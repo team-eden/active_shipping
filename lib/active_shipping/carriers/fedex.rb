@@ -19,7 +19,7 @@ module ActiveShipping
     }
 
     DELIVERY_ADDRESS_NODE_NAMES = %w(DestinationAddress ActualDeliveryAddress)
-    SHIPPER_ADDRESS_NODE_NAMES  = %w(ShipperAddress)
+    SHIPPER_ADDRESS_NODE_NAMES = %w(ShipperAddress)
 
     SERVICE_TYPES = {
       "PRIORITY_OVERNIGHT" => "FedEx Priority Overnight",
@@ -197,7 +197,7 @@ module ActiveShipping
       xml_builder = Nokogiri::XML::Builder.new do |xml|
         xml.ProcessShipmentRequest(xmlns: 'http://fedex.com/ws/ship/v13') do
           build_request_header(xml)
-          build_version_node(xml, 'ship', 13, 0 ,0)
+          build_version_node(xml, 'ship', 13, 0, 0)
 
           xml.RequestedShipment do
             xml.ShipTimestamp(ship_timestamp(options[:turn_around_time]).iso8601(0))
@@ -223,6 +223,8 @@ module ActiveShipping
                 build_shipment_responsible_party_node(xml, options[:shipper] || origin)
               end
             end
+
+            build_special_services(xml, options) if options[:return_reason]
 
             xml.LabelSpecification do
               xml.LabelFormatType('COMMON2D')
@@ -298,7 +300,7 @@ module ActiveShipping
       xml_builder = Nokogiri::XML::Builder.new do |xml|
         xml.RateRequest(xmlns: 'http://fedex.com/ws/rate/v13') do
           build_request_header(xml)
-          build_version_node(xml, 'crs', 13, 0 ,0)
+          build_version_node(xml, 'crs', 13, 0, 0)
 
           # Returns delivery dates
           xml.ReturnTransitAndCommit(true)
@@ -425,8 +427,8 @@ module ActiveShipping
               xml.Value(tracking_number)
             end
 
-            xml.ShipDateRangeBegin(options[:ship_date_range_begin])         if options[:ship_date_range_begin]
-            xml.ShipDateRangeEnd(options[:ship_date_range_end])             if options[:ship_date_range_end]
+            xml.ShipDateRangeBegin(options[:ship_date_range_begin]) if options[:ship_date_range_begin]
+            xml.ShipDateRangeEnd(options[:ship_date_range_end]) if options[:ship_date_range_end]
             xml.TrackingNumberUniqueIdentifier(options[:unique_identifier]) if options[:unique_identifier]
           end
 
@@ -476,6 +478,18 @@ module ActiveShipping
       end
     end
 
+    def build_special_services(xml, options)
+      xml.SpecialServicesRequested do
+        xml.SpecialServiceTypes('RETURN_SHIPMENT')
+        xml.ReturnShipmentDetail do
+          xml.ReturnType('PRINT_RETURN_LABEL')
+          xml.Rma do
+            xml.Reason(options[:return_reason])
+          end
+        end
+      end
+    end
+
     def parse_rate_response(origin, destination, packages, response, options)
       xml = build_document(response, 'RateReply')
 
@@ -499,12 +513,12 @@ module ActiveShipping
             currency = rated_shipment.at('RatedShipmentDetails/ShipmentRateDetail/TotalNetCharge/Currency').text
 
             RateEstimate.new(origin, destination, @@name,
-                 self.class.service_name_for_code(service_type),
-                 :service_code => service_code,
-                 :total_price => rated_shipment.at('RatedShipmentDetails/ShipmentRateDetail/TotalNetCharge/Amount').text.to_f,
-                 :currency => currency,
-                 :packages => packages,
-                 :delivery_range => delivery_range)
+                             self.class.service_name_for_code(service_type),
+                             :service_code => service_code,
+                             :total_price => rated_shipment.at('RatedShipmentDetails/ShipmentRateDetail/TotalNetCharge/Amount').text.to_f,
+                             :currency => currency,
+                             :packages => packages,
+                             :delivery_range => delivery_range)
           rescue NoMethodError
             missing_xml_field = true
             nil
@@ -535,7 +549,7 @@ module ActiveShipping
 
       # if there's no delivery timestamp but we do have a transit time, use it
       if delivery_timestamp.blank? && transit_time.present?
-        transit_range  = parse_transit_times([transit_time, max_transit_time.presence || transit_time])
+        transit_range = parse_transit_times([transit_time, max_transit_time.presence || transit_time])
         pickup_date = options[:pickup_date] || ship_date(options[:turn_around_time])
 
         delivery_range = transit_range.map { |days| business_days_from(pickup_date, days, is_home_delivery) }
@@ -554,12 +568,12 @@ module ActiveShipping
       base_64_image = xml.css("Label Image").text
 
       labels = [Label.new(tracking_number, Base64.decode64(base_64_image))]
-      LabelResponse.new(success, message, response_info, {labels: labels})
+      LabelResponse.new(success, message, response_info, { labels: labels })
     end
 
     def business_days_from(date, days, is_home_delivery=false)
       future_date = date
-      count       = 0
+      count = 0
 
       while count < days
         future_date += 1.day
@@ -601,30 +615,30 @@ module ActiveShipping
 
         all_tracking_details = xml.root.xpath('CompletedTrackDetails/TrackDetails')
         tracking_details = case all_tracking_details.length
-          when 1
-            all_tracking_details.first
-          when 0
-            message = "The response did not contain tracking details"
-            return TrackingResponse.new(
-              false,
-              message,
-              Hash.from_xml(response),
-              carrier: @@name,
-              xml: response,
-              request: last_request
-            )
-          else
-            all_unique_identifiers = xml.root.xpath('CompletedTrackDetails/TrackDetails/TrackingNumberUniqueIdentifier').map(&:text)
-            message = "Multiple matches were found. Specify a unqiue identifier: #{all_unique_identifiers.join(', ')}"
-            return TrackingResponse.new(
-              false,
-              message,
-              Hash.from_xml(response),
-              carrier: @@name,
-              xml: response,
-              request: last_request
-            )
-        end
+                           when 1
+                             all_tracking_details.first
+                           when 0
+                             message = "The response did not contain tracking details"
+                             return TrackingResponse.new(
+                               false,
+                               message,
+                               Hash.from_xml(response),
+                               carrier: @@name,
+                               xml: response,
+                               request: last_request
+                             )
+                           else
+                             all_unique_identifiers = xml.root.xpath('CompletedTrackDetails/TrackDetails/TrackingNumberUniqueIdentifier').map(&:text)
+                             message = "Multiple matches were found. Specify a unqiue identifier: #{all_unique_identifiers.join(', ')}"
+                             return TrackingResponse.new(
+                               false,
+                               message,
+                               Hash.from_xml(response),
+                               carrier: @@name,
+                               xml: response,
+                               request: last_request
+                             )
+                           end
 
         first_notification = tracking_details.at('Notification')
         severity = first_notification.at('Severity').text
@@ -655,12 +669,12 @@ module ActiveShipping
         end
 
         origin = if origin_node = tracking_details.at('OriginLocationAddress')
-          Location.new(
-            country: origin_node.at('CountryCode').text,
-            province: origin_node.at('StateOrProvinceCode').text,
-            city: origin_node.at('City').text
-          )
-        end
+                   Location.new(
+                     country: origin_node.at('CountryCode').text,
+                     province: origin_node.at('StateOrProvinceCode').text,
+                     city: origin_node.at('City').text
+                   )
+                 end
 
         destination = extract_address(tracking_details, DELIVERY_ADDRESS_NODE_NAMES)
         shipper_address = extract_address(tracking_details, SHIPPER_ADDRESS_NODE_NAMES)
@@ -670,19 +684,19 @@ module ActiveShipping
         scheduled_delivery_time = extract_timestamp(tracking_details, 'EstimatedDeliveryTimestamp')
 
         tracking_details.xpath('Events').each do |event|
-          address  = event.at('Address')
+          address = event.at('Address')
           next if address.nil? || address.at('CountryCode').nil?
 
-          city     = address.at('City').try(:text)
-          state    = address.at('StateOrProvinceCode').try(:text)
+          city = address.at('City').try(:text)
+          state = address.at('StateOrProvinceCode').try(:text)
           zip_code = address.at('PostalCode').try(:text)
-          country  = address.at('CountryCode').try(:text)
+          country = address.at('CountryCode').try(:text)
 
           location = Location.new(:city => city, :state => state, :postal_code => zip_code, :country => country)
           description = event.at('EventDescription').text
           type_code = event.at('EventType').text
 
-          time          = Time.parse(event.at('Timestamp').text)
+          time = Time.parse(event.at('Timestamp').text)
           zoneless_time = time.utc
 
           shipment_events << ShipmentEvent.new(description, zoneless_time, location, description, type_code)
@@ -760,7 +774,7 @@ module ActiveShipping
       if node
         args[:country] =
           node.at('CountryCode').try(:text) ||
-          ActiveUtils::Country.new(:alpha2 => 'ZZ', :name => 'Unknown or Invalid Territory', :alpha3 => 'ZZZ', :numeric => '999')
+            ActiveUtils::Country.new(:alpha2 => 'ZZ', :name => 'Unknown or Invalid Territory', :alpha3 => 'ZZZ', :numeric => '999')
 
         args[:province] = node.at('StateOrProvinceCode').try(:text) || 'unknown'
         args[:city] = node.at('City').try(:text) || 'unknown'
